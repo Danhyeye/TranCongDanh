@@ -12,14 +12,31 @@
 
   <!-- You may reorganise the whole HTML, as long as your form achieves the same effect. -->
   <form onsubmit="return !1">
-    <h5>Swap</h5>
-    <label for="input-amount">Amount to send</label>
-    <input id="input-amount" />
+    <h5 class="title">Swap</h5>
 
-    <label for="output-amount">Amount to receive</label>
-    <input id="output-amount" />
+    <div class="card">
+      <div class="field">
+        <label for="input-amount">Amount to send</label>
+        <div class="row">
+          <input id="input-amount" type="number" placeholder="0.00" />
+          <select class="token-select">
+          </select>
+        </div>
+      </div>
 
-    <button>CONFIRM SWAP</button>
+      <div class="divider"></div>
+
+      <div class="field">
+        <label for="output-amount">Amount to receive</label>
+        <div class="row">
+          <input id="output-amount" type="number" placeholder="0.00" disabled />
+          <select class="token-select">
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <button class="submit">Confirm Swap</button>
   </form>
   <script src="script.js"></script>
 </body>

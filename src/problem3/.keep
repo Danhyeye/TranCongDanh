@@ -1,0 +1,168 @@
+# Code Analysis: Computational Inefficiencies and Anti-patterns
+
+## Critical Issues
+
+### 1. **Logic Error: Undefined Variable**
+- **Issue**: In the filter function, `lhsPriority` is referenced but never defined. Should be `balancePriority`.
+- **Impact**: This will cause a runtime error.
+
+### 2. **Logic Error: Inverted Filter Condition**
+- **Issue**: The filter returns `true` when `balance.amount <= 0`, which means it's filtering OUT positive balances (keeping only zero/negative balances).
+- **Impact**: The component will only display wallets with zero or negative balances, which is likely incorrect.
+
+### 3. **Logic Error: Incomplete Sort Return**
+- **Issue**: The sort comparator doesn't return `0` when priorities are equal, which can lead to unstable sorting.
+- **Impact**: Items with equal priority may not maintain their original order.
+
+### 4. **Type Safety Issues**
+- **Issue**: `WalletBalance` interface doesn't include `blockchain` property, but the code uses `balance.blockchain`.
+- **Issue**: `getPriority` parameter is typed as `any`, losing type safety.
+- **Issue**: `BoxProps` is referenced but never imported.
+- **Issue**: `classes` is referenced but never imported/defined.
+- **Impact**: TypeScript errors, potential runtime errors, and loss of type checking benefits.
+
+### 5. **Missing Data Validation**
+- **Issue**: No schema validation for data from `WalletBalance` and `FormattedWalletBalance`. The code assumes the data structure matches the interfaces without runtime validation.
+- **Impact**: Runtime errors if API/hook returns unexpected data structure (e.g., missing `blockchain` property, `amount` not a number, `prices` not an object). TypeScript types only provide compile-time checking, not runtime safety.
+
+### 6. **Unused Computed Value**
+- **Issue**: `formattedBalances` is computed but never used. The `rows` mapping uses `sortedBalances` instead.
+- **Impact**: Wasted computation and memory.
+
+### 7. **Incorrect Dependency Array**
+- **Issue**: `prices` is included in the `useMemo` dependency array but never used inside the memoized function.
+- **Impact**: Unnecessary recalculations when `prices` changes, even though it doesn't affect the result.
+
+## Performance Issues
+
+### 8. **Redundant Function Calls**
+- **Issue**: `getPriority` is called multiple times for the same balance:
+  - Once in the filter function
+  - Twice in the sort function (for each comparison)
+- **Impact**: O(n log n) redundant function calls during sorting, plus n calls during filtering.
+
+### 9. **Function Recreation on Every Render**
+- **Issue**: `getPriority` is defined inside the component, causing it to be recreated on every render.
+- **Impact**: Unnecessary function object creation (minor, but avoidable).
+
+### 10. **Computation in Render**
+- **Issue**: `usdValue` calculation happens during render without memoization.
+- **Impact**: Recalculated on every render, even when inputs haven't changed.
+
+## Code Quality Issues
+
+### 11. **Inconsistent Variable Naming**
+- **Issue**: Uses `lhs`/`rhs` in sort parameters but `leftPriority`/`rightPriority` for variables.
+- **Impact**: Reduced code readability and consistency.
+
+### 12. **Missing Return Type Annotations**
+- **Issue**: `getPriority` function lacks explicit return type.
+- **Impact**: Reduced type safety and code clarity.
+
+## Refactored Solution
+
+```typescript
+import { z } from "zod"
+
+export const WalletBalanceSchema = z.object({
+  currency: z.string(),
+  amount: z.number(),
+  blockchain: z.string(),
+});
+
+export const FormattedWalletBalanceSchema = WalletBalanceSchema.extend({
+  formatted: z.string(),
+});
+
+export type WalletBalance = z.infer<typeof WalletBalanceSchema>;
+export type FormattedWalletBalance = z.infer<typeof FormattedWalletBalanceSchema>;
+
+type Blockchain = 'Osmosis' | 'Ethereum' | 'Arbitrum' | 'Zilliqa' | 'Neo';
+
+interface Props extends BoxProps {
+  // Add any specific props here
+}
+
+// Move outside component to avoid recreation
+const getPriority = (blockchain: Blockchain | string): number => {
+  switch (blockchain) {
+    case 'Osmosis':
+      return 100;
+    case 'Ethereum':
+      return 50;
+    case 'Arbitrum':
+      return 30;
+    case 'Zilliqa':
+      return 20;
+    case 'Neo':
+      return 20;
+    default:
+      return -99;
+  }
+};
+
+const WalletPage: React.FC<Props> = (props: Props) => {
+  const { children, ...rest } = props;
+  const balances = useWalletBalances();
+  const prices = usePrices();
+
+  // Memoize sorted and filtered balances
+  const sortedBalances = useMemo(() => {
+    return balances
+      .filter((balance: WalletBalance) => {
+        const balancePriority = getPriority(balance.blockchain);
+        // Fixed: use balancePriority instead of lhsPriority
+        // Fixed: filter to keep only positive balances with valid priority
+        return balancePriority > -99 && balance.amount > 0;
+      })
+      .sort((lhs: WalletBalance, rhs: WalletBalance) => {
+        const leftPriority = getPriority(lhs.blockchain);
+        const rightPriority = getPriority(rhs.blockchain);
+        // Fixed: return 0 for equal priorities
+        return rightPriority - leftPriority; // Simplified: descending order
+      });
+  }, [balances]); // Fixed: removed prices from dependencies
+
+  // Memoize formatted balances with USD values
+  const formattedBalances = useMemo(() => {
+    return sortedBalances.map((balance: WalletBalance): FormattedWalletBalance => {
+      return {
+        ...balance,
+        formatted: balance.amount.toFixed(2), // Fixed: added decimal places
+      };
+    });
+  }, [sortedBalances]);
+
+  // Memoize rows to avoid recalculation
+  const rows = useMemo(() => {
+    return formattedBalances.map((balance: FormattedWalletBalance) => {
+      const usdValue = prices[balance.currency] * balance.amount;
+      return (
+        <WalletRow
+          className={classes.row}
+          key={index}
+          amount={balance.amount}
+          usdValue={usdValue}
+          formattedAmount={balance.formatted}
+        />
+      );
+    });
+  }, [formattedBalances, prices]);
+
+  return (
+    <div {...rest}>
+      {rows}
+    </div>
+  );
+};
+```
+
+## Key Improvements Summary
+
+1. **Fixed Logic Errors**: Corrected undefined variable, inverted filter, and incomplete sort return
+2. **Fixed Type Safety**: Added `blockchain` to `WalletBalance`, properly typed `getPriority`, added type annotations
+3. **Eliminated Redundant Calls**: Moved `getPriority` outside component, optimized filter/sort logic
+4. **Fixed Dependencies**: Removed `prices` from first `useMemo`, added proper memoization for `formattedBalances` and `rows`
+5. **Performance**: Added memoization for `formattedBalances` and `rows` to prevent unnecessary recalculations
+6. **Code Quality**: Consistent naming, proper return types, cleaner sort logic
+
